@@ -1,0 +1,160 @@
+---
+title: "Assignment 4: Sensitivity Analysis"
+author: "Guillermo Romero"
+date: today
+execute:
+  warning: false
+format:
+  pdf:
+      toc: false
+      shift-heading-level-by: 2
+      fig-pos: "H"
+      fig-cap-location: top
+      geometry:
+        - top=1in
+        - right=.8in
+        - bottom=1in
+        - left=.8in
+      link-citations: yes
+      linkcolor: blue
+      include-in-header:
+        text: |
+          \usepackage{fancyhdr}
+          \usepackage{titling}
+          \pagestyle{fancy}
+          \fancyhf{}
+          \renewcommand\maketitle{
+            \fancyhead[C]{
+              \thetitle
+              \ifx \theauthor\empty  \else \ – \theauthor \fi
+              \ifx \thedate\empty  \else \ – \thedate \ \fi
+            }
+          }
+          \fancyfoot[C]{\thepage}
+editor:
+  markdown:
+    wrap: sentence
+---
+
+For a given forest, you will perform a sensitivity analysis of model predictions of conductance Consider the sensitivity of your estimate to uncertainty in the following parameters and inputs • height • kd • k0 • v
+
+Windspeeds v are normally distributed with a mean of 250 cm/s with a standard deviation of 30 cm/s
+
+For vegetation height assume that height is somewhere between 9.5 and 10.5 m (but any value in that range is equally likely)
+
+For the kd and k0 parameters you can assume that they are normally distributed with standard deviation of 1% of their default values
+
+# a)
+
+Use the Latin hypercube approach to generate parameter values for the 4 parameters
+
+```{r}
+#| include: false
+library(tidyverse)
+library(lhs)
+library(purrr)
+library(ggthemr)
+library(sensitivity)
+
+```
+
+```{r}
+source("Catm-1.R")
+```
+
+```{r}
+# set a random seed to make things 'random'
+set.seed(42)
+
+# specify parameters
+pnames = c("v", "height","k_o", "k_d")
+
+# how many parameters
+npar =  length(pnames)
+               
+# how many samples
+nsample = 50
+
+# random values array matrix using LHS for the parameters
+parm_quant = randomLHS(nsample, npar)
+colnames(parm_quant) = pnames
+
+
+parm = as.data.frame(matrix(nrow=nrow(parm_quant), ncol=ncol(parm_quant)))
+colnames(parm) = pnames
+
+
+
+parm[,"v"] = qnorm(parm_quant[,"v"], mean=250, sd=30)
+
+parm[,"k_d"] = qnorm(parm_quant[,"k_d"], mean=0.7, sd=.007)
+
+parm[,"k_o"] = qnorm(parm_quant[,"k_o"], mean=0.1, sd=.001)
+
+# uniform
+parm[,"height"] = qunif(parm_quant[,"height"], min = 9.5, max = 10.5)
+```
+
+# b)
+
+Run the atmospheric conductance model for these parameters
+
+```{r}
+Ca_outputs = pmap(parm, Catm)
+
+# Use map_dfr to create param_outputs dataframe
+parameter_outputs <- map_dfr(seq_along(Ca_outputs), ~parm[.x,] %>% mutate(output = Ca_outputs[[.x]]))
+```
+
+#c) Plot conductance estimates in a way that accounts for parameter uncertainty
+
+```{r}
+ggthemr('flat dark', type ='outer', layout= 'minimal')
+
+tmp = parameter_outputs %>% gather(pnames, key="parameter", value="value")
+ggplot(tmp, aes(x = parameter, y = value, col = parameter)) +
+  geom_boxplot() +
+  labs(y = "Parameter Value", title = "Boxplot of Parameters")
+
+```
+
+```{r}
+# Graph the cumulative distribution
+ggplot(parameter_outputs, aes(output)) +
+  stat_ecdf() +
+  labs(x = "Conductance Estimates", y = "Cumulative Distribution", title = "Cumulative Distribution of Conductance Estimates") 
+
+```
+
+# d)
+
+Plot conductance estimates against each of your parameters
+
+```{r}
+# Create plots for parameters effect on output
+
+parameter_outputs |> 
+  pivot_longer(cols = v:k_d, names_to = "parm", values_to = "value") |> 
+  ggplot( aes(x = value, y = output, col = parm)) +
+  geom_point(size = 1.5) +
+  facet_wrap(~ parm, ncol = 2, scales = "free") 
+  labs(x = "Value", y = "Output", color = "Parameter", title = "Ca Model Output by Parameter")
+```
+
+# e)
+
+Estimate the Partial Rank Correlation Coefficients
+
+```{r}
+partial_correlation = pcc(parm, parameter_outputs$output, rank = TRUE)
+
+plot(partial_correlation)
+```
+
+# f)
+
+Discuss what your results tell you about how aerodynamic conductance?
+What does it suggest about what you should focus on if you want to reduce uncertainty in aerodymaic conductance estimates?
+Does this tell you anything about the sensitivity of plant water use to climate change?
+
+**The results indicate that aerodynamic conductance is highly sensitive to windspeed. To reduce uncertainty in conductance estimates, focus on minimizing windspeed variability. This suggests that climate change, by potentially affecting windspeed, could influence plant water use through its impact on conductance.**
